@@ -25,12 +25,34 @@ touch-scroll-lock `<script>` and `html, body { ... }` CSS injected.
 - [x] Shallow-clone branch `gh-pages` → `~/wick-editor`
 - [x] Inject user's `<style>` before `</head>` and `<script>` before `</body>`
 - [x] Delete `CNAME`
-- [ ] Commit + push `gh-pages`
-- [ ] Enable GitHub Pages (branch `gh-pages`, root) via API
-- [ ] Verify the URL serves 200 and contains both injected blocks
+- [x] Commit + push `gh-pages`
+- [x] GitHub Pages already enabled by the fork — confirmed source = `gh-pages` root,
+      `cname: null`, builds are `legacy`
+- [x] Verify the URL serves 200 and contains both injected blocks
 
-## Verification bar
-- `https://siwakornt.github.io/wick-editor/` returns HTTP 200
-- Response body contains `overscroll-behavior: none` and the `touchmove` guard
-- Static asset (`main.*.chunk.js`) referenced by index.html returns 200
-- Optional: open in browser and confirm the page renders the editor
+## Bug I introduced, and the fix (commit `687df78`)
+First injection commit (`7bcb347`) computed `lastIndexOf('</head>')` and
+`lastIndexOf('</body>')` up front, then inserted the CSS first. That insertion
+shifted everything after `</head>`, so the stale `</body>` index pointed into
+the middle of the inline webpack runtime — the touchmove `<script>` spliced
+`function` into `fu` + `nction(){...}` and the app could not boot.
+
+Fixed by inserting **inside-out**: place the later `</body>` block first, then
+recompute and place the `</head>` block. Verification script
+(`verify.js`) strips the two blocks one at a time, recomputing indices after
+each removal, and md5-compares the remainder against upstream.
+
+## Verification results (commit `687df78`)
+- `GET /wick-editor/` → HTTP 200, 7857 bytes
+- Stripped page md5 = `a45bec1005baadc07099ef52e0f596e2` = upstream `index.html`
+  → page is upstream plus **exactly** the two injected blocks, nothing else touched
+- `</style>\n</head>` present → style block sits immediately before `</head>`
+- `</script>\n</body>` present → touchmove script sits immediately before `</body>`
+- Inline webpack runtime ends cleanly: `...var s=n;a()}([])</script><script src="./static/js/1...`
+- All 10 referenced assets return 200/206 (main/1/runtime chunks, both CSS,
+  wickengine.js, preloadjs, gif.js, favicon, manifest)
+
+## Not verified
+- No visual/JS boot check: no desktop browser is connected to this session, so
+  rendering could not be inspected. Structure + assets are proven; the actual
+  first paint on a phone still needs a human eyeball.
